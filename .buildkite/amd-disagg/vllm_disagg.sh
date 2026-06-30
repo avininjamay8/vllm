@@ -308,6 +308,7 @@ build_tp_cmd() {
   "kv_connector": "MoRIIOConnector",
   "kv_role": "${KV_ROLE}",
   "kv_connector_extra_config": {
+    "read_mode": "${MORIIO_READ_MODE:-true}",
     "proxy_ip": "${PROXY_IP}",
     "proxy_ping_port": "${PROXY_PING_PORT}",
     "http_port": "${port}",
@@ -355,6 +356,7 @@ build_ep_cmd() {
   "kv_role": "${KV_ROLE}",
   "kv_port": "${KV_PORT}",
   "kv_connector_extra_config": {
+    "read_mode": "${MORIIO_READ_MODE:-true}",
     "proxy_ip": "${PROXY_IP}",
     "proxy_port": "${PROXY_PORT}",
     "proxy_ping_port": "${PROXY_PING_PORT}",

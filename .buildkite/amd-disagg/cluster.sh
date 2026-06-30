@@ -80,7 +80,12 @@ export LOG_PATH="${LOG_PATH:-${_LOG_BASE}/${SLURM_JOB_ID:-local}}"
 export VLLM_USE_V1="${VLLM_USE_V1:-1}"
 export HSA_NO_SCRATCH_RECLAIM="${HSA_NO_SCRATCH_RECLAIM:-1}"
 # MoRIIO read-mode: decode pulls KV from prefill (matches the toy proxy READ path).
-export VLLM_MORIIO_CONNECTOR_READ_MODE="${VLLM_MORIIO_CONNECTOR_READ_MODE:-1}"
+# NOTE: the VLLM_MORIIO_CONNECTOR_READ_MODE env var is DEPRECATED+IGNORED in vllm
+# >=0.22.1 (moriio_common.py:_warn_deprecated_env_vars). The connector now reads
+# 'read_mode' from kv_transfer_config.kv_connector_extra_config. vllm_disagg.sh
+# injects ${MORIIO_READ_MODE} into that JSON. Accepted values: "true"/"1" -> READ,
+# "false"/"0" -> WRITE (default in-connector is WRITE).
+export MORIIO_READ_MODE="${MORIIO_READ_MODE:-true}"
 export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-3600}"
 
 # ----------------------------------------------------------------- patch / scale

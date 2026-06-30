@@ -46,3 +46,15 @@ models:
     decode:
       tp: "--gpu-memory-utilization 0.95"
       ep: '--gpu-memory-utilization 0.75 --compilation-config {"cudagraph_mode":"PIECEWISE","custom_ops":["+quant_fp8"]}'
+
+  - model: MiniMax-M3-MXFP8
+    # Perf flags transcribed from the upstream vLLM ROCm MiniMax-M3 recipes.
+    # The launcher owns --tensor-parallel-size, --host/--port and the MoRIIO
+    # --kv-transfer-config block, so only model-specific knobs live here.
+    env:
+      VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
+    base_flags: "--block-size 128 --attention-backend TRITON_ATTN"
+    prefill:
+      tp: "--enforce-eager"
+    decode:
+      tp: '--compilation-config {"cudagraph_mode":"FULL_DECODE_ONLY"}'
