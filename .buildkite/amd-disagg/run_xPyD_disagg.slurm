@@ -163,6 +163,33 @@ export DOCKER_CONT_NAME="vllm_disagg_${MODEL_NAME:-model}_${SLURM_JOB_ID}"
 echo "[disagg-pd] IPADDRS=${IPADDRS}"
 echo "[disagg-pd] launching ${NUM_NODES} containers (1/node) -> vllm_disagg.sh node"
 
+# ----------------------------------------------------------------------------
+# Optional: pre-stage the model from NFS to node-local NVMe on every node.
+# Large models (e.g. MiniMax-M3-MXFP8, 414GB) loaded directly off NFS by ~8 TP
+# workers/node throttle to ~50MB/s (NFS mmap contention); a one-shot parallel
+# copy to local NVMe + local load is far faster. Opt-in and cluster-specific:
+# set MODEL_STAGE_SRC (and MODEL_STAGE_LOCAL) in the pipeline step env to enable;
+# if MODEL_STAGE_SRC is unset, this is skipped and the model loads from MODEL_DIR
+# as-is. Idempotent via a .stage_complete marker.
+# ----------------------------------------------------------------------------
+if [ -n "${MODEL_STAGE_SRC:-}" ]; then
+  MODEL_STAGE_LOCAL="${MODEL_STAGE_LOCAL:-/mnt/m2m_nobackup/${USER:-vllm}/models/${MODEL_NAME:-model}}"
+  echo "[disagg-pd] pre-staging model -> node-local NVMe on all nodes: ${MODEL_STAGE_LOCAL}"
+  srun --nodelist="$SELECTED_NODELIST_STR" \
+       --nodes="$NUM_NODES" --ntasks="$NUM_NODES" --ntasks-per-node=1 \
+    bash -c '
+      set -e
+      SRC="'"$MODEL_STAGE_SRC"'"; DST="'"$MODEL_STAGE_LOCAL"'"
+      mkdir -p "$DST"
+      if [ -f "$DST/.stage_complete" ]; then echo "$(hostname): already staged"; else
+        echo "$(hostname): copying $(du -sh "$SRC" 2>/dev/null | cut -f1) NFS->local ..."
+        find "$SRC" -maxdepth 1 -type f -printf "%f\n" | xargs -P 8 -I{} cp -f "$SRC/{}" "$DST/{}"
+        touch "$DST/.stage_complete"
+        echo "$(hostname): staged -> $(du -sh "$DST" 2>/dev/null | cut -f1)"
+      fi
+    ' || { echo "[disagg-pd] model pre-stage FAILED" >&2; exit 1; }
+fi
+
 # One task per node; SLURM supplies the global rank via $SLURM_PROCID. --label
 # prefixes each line with its task id so interleaved orchestration logs stay
 # readable in the job log that run-slurm-disagg-test.sh streams to CI. rank 0's
@@ -192,6 +219,7 @@ srun --label \
         --ulimit nofile=1048576:1048576 \
         -v "$HOME":"$HOME" \
         -v "$SHARED_MOUNT":"$SHARED_MOUNT" \
+        -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
         -v "$DISAGG_SCRIPTS_DIR":"$CONTAINER_SCRIPTS" \
         -e HF_TOKEN \
         -e SLURM_JOB_ID="$SLURM_JOB_ID" \
@@ -202,6 +230,8 @@ srun --label \
         -e xP="$xP" -e yD="$yD" \
         -e GPUS_PER_NODE="$GPUS_PER_NODE" \
         -e CLUSTER_ENV="$CLUSTER_ENV" \
+        -e MODEL_NAME="${MODEL_NAME:-}" \
+        -e MODEL_DIR="${MODEL_DIR:-}" \
         -e LOG_PATH="$LOG_PATH" \
         -e RUN_AFTER_HEALTH="$RUN_AFTER_HEALTH" \
         -e HEALTH_TIMEOUT_S="$HEALTH_TIMEOUT_S" \
