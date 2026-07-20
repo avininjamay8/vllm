@@ -925,6 +925,15 @@ class MoRIIOConnectorScheduler:
         ):
             return False, None
 
+        # WRITE mode: flush request stranded in _reqs_need_pending_save.
+        # Chunked prefill puts requests here if the first chunk does not
+        # cover all prompt blocks. When prefill finishes with max_tokens=1
+        # the request is never re-scheduled, so the promotion loop in
+        # build_connector_meta never runs and the RDMA write never happens.
+        if self.mode == MoRIIOMode.WRITE and request.request_id in self._reqs_need_pending_save:
+            _req, _blocks = self._reqs_need_pending_save.pop(request.request_id)
+            self._reqs_need_save[request.request_id] = (_req, _blocks)
+
         # computed_block_ids = block_ids if all_full else block_ids[:-1]
         computed_block_ids = block_ids
         # If prompt < block_size, no xfer so free blocks immediately.

@@ -181,7 +181,7 @@ async def send_request_to_prefill(
                 raise RuntimeError(error_message)
 
 
-async def start_decode_request(endpoint, req_data, request_id, selected_decode_dp_rank=None):
+async def start_decode_request(endpoint, req_data, request_id):
     session = aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=6 * 6000 * 6000)
     )
@@ -189,8 +189,6 @@ async def start_decode_request(endpoint, req_data, request_id, selected_decode_d
         "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
         "X-Request-Id": request_id,
     }
-    if selected_decode_dp_rank is not None:
-        headers["X-data-parallel-rank"] = str(selected_decode_dp_rank)
     response = await session.post(url=endpoint, json=req_data, headers=headers)
     return session, response
 
@@ -254,14 +252,9 @@ async def handle_request(api: str, request: Request):
         selected_prefill_dp_rank = None
         if prefill_instance_endpoint["dp_size"] > 1:
             selected_prefill_dp_rank = example_round_robin_dp_loader(
-                request_nums,
+                request_nums // len(prefill_instance_endpoint),
                 prefill_instance_endpoint["dp_size"],
             )
-
-        # Select decode DP rank here so we can tell prefill which rank to target
-        selected_decode_dp_rank = None
-        if decode_instance_endpoint["dp_size"] > 1:
-            selected_decode_dp_rank = request_nums % decode_instance_endpoint["dp_size"]
 
         # Embed both zmq_addresses in the request_id so the connector can parse
         # the peer's host/ports from it, similar to P2P-NCCL
@@ -284,9 +277,6 @@ async def handle_request(api: str, request: Request):
             decode_instance_endpoint["tp_size"]
         )
         req_data_to_prefill["kv_transfer_params"]["transfer_id"] = transfer_id
-        # Tell prefill which decode DP rank owns this request.
-        if selected_decode_dp_rank is not None:
-            req_data_to_prefill["kv_transfer_params"]["remote_dp_rank"] = selected_decode_dp_rank
 
         prefill_request_url = prefill_instance_endpoint["request_address"] + api
         send_prefill_task = asyncio.create_task(
@@ -298,11 +288,7 @@ async def handle_request(api: str, request: Request):
             )
         )
 
-        # In READ mode prefill generates 1 token and decode generates the
-        # remaining max_tokens-1. In WRITE mode decode generates all tokens;
-        # subtracting 1 here would break requests with max_tokens=1.
-        if TRANSFER_TYPE == "READ":
-            req_data["max_tokens"] -= 1
+        req_data["max_tokens"] -= 1
 
         req_data["kv_transfer_params"] = {
             "do_remote_decode": False,
@@ -332,27 +318,10 @@ async def handle_request(api: str, request: Request):
 
         if selected_prefill_dp_rank is not None:
             req_data["kv_transfer_params"]["remote_dp_rank"] = selected_prefill_dp_rank
-        # Mark this decode request as the leader so only the DP rank that
-        # actually received it sends the blocks-ready notify to prefill.
-        # Without this flag all 8 decode DP ranks (is_kv_master=True) would
-        # each send a notify, flooding prefill with empty block_notify_lists.
-        req_data["kv_transfer_params"]["is_request_leader"] = True
-        # Explicit prefill address fields: used as fallback when the internal
-        # vLLM request_id is a short hex (not our full ___prefill_addr_... format)
-        # so that _release_write_prefill_blocks can find the notify address.
-        _prefill_zmq = prefill_instance_endpoint["zmq_address"]
-        _prefill_host = _prefill_zmq.split(",")[0].split(":")[-1]
-        _prefill_notify = _prefill_zmq.split("notify:")[-1]
-        req_data["kv_transfer_params"]["remote_host"] = _prefill_host
-        req_data["kv_transfer_params"]["remote_notify_port"] = int(_prefill_notify)
 
         decode_request_url = decode_instance_endpoint["request_address"] + api
-        # remote_dp_rank for decode already set above to selected_prefill_dp_rank
-        # (tells decode which prefill DP rank to notify "blocks ready")
-        # selected_decode_dp_rank is passed via X-data-parallel-rank header only
-
         decode_request_task = asyncio.create_task(
-            start_decode_request(decode_request_url, req_data, request_id, selected_decode_dp_rank)
+            start_decode_request(decode_request_url, req_data, request_id)
         )
 
         session, decode_response = await decode_request_task
