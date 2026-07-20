@@ -510,7 +510,15 @@ class MoRIIOConnectorMetadata(KVConnectorMetadata):
             remote_port=int(remote_handshake_port),
             remote_handshake_port=int(remote_handshake_port),
             remote_notify_port=int(remote_notify_port),
-            tp_size=kv_transfer_params.get("tp_size", 1),
+            # Remote peer TP degree (used as remote_tp_size downstream). The
+            # proxy advertises it under "remote_tp_size"; #46332 read "tp_size"
+            # which is absent on WRITE producer requests -> defaulted to 1 ->
+            # rank collapse. Read the right key; 0 == unknown (== homogeneous).
+            tp_size=int(
+                kv_transfer_params.get("remote_tp_size")
+                or kv_transfer_params.get("tp_size")
+                or 0
+            ),
             remote_dp_size=kv_transfer_params.get("remote_dp_size", 1),
             multi_pod_hosts=_pod_hosts,
             remote_dp_size_local=_remote_dp_size_local,
