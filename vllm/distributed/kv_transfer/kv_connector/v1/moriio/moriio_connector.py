@@ -618,6 +618,8 @@ class MoRIIOConnectorScheduler:
         below for the exactly-once-across-pods reasoning.
         """
         params = request.kv_transfer_params
+        logger.info("MoRIIO update_state_after_alloc: rid=%r params_keys=%r mode=%s is_producer=%s",
+            request.request_id, list(params.keys()) if params else None, self.mode, self.is_producer)
         if not params:
             return
         # LLM-D sidecar compat: the routing-sidecar (--kv-connector=nixlv2)
@@ -769,6 +771,11 @@ class MoRIIOConnectorScheduler:
                             _remote_dp_rank_for_port, tp_index
                         )
 
+                        logger.info(
+                            "MoRIIO send_notify_block: rid=%r transfer_id=%r blocks=%s host=%r port=%d num_ext=%d leader=%s",
+                            request.request_id, request.kv_transfer_params.get("transfer_id"),
+                            len(block_notify_list), _notify_host, target_port, num_external_tokens, _leader_flag
+                        )
                         self.send_notify_block(
                             req_id=request.request_id,
                             transfer_id=request.kv_transfer_params["transfer_id"],

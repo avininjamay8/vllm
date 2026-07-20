@@ -287,6 +287,9 @@ async def handle_request(api: str, request: Request):
         # Tell prefill which decode DP rank owns this request.
         if selected_decode_dp_rank is not None:
             req_data_to_prefill["kv_transfer_params"]["remote_dp_rank"] = selected_decode_dp_rank
+            # Same override on prefill: connector uses our rank verbatim for
+            # the RDMA session selection, not a local re-hash.
+            req_data_to_prefill["kv_transfer_params"]["remote_dp_rank_override"] = True
 
         prefill_request_url = prefill_instance_endpoint["request_address"] + api
         send_prefill_task = asyncio.create_task(
@@ -332,6 +335,12 @@ async def handle_request(api: str, request: Request):
 
         if selected_prefill_dp_rank is not None:
             req_data["kv_transfer_params"]["remote_dp_rank"] = selected_prefill_dp_rank
+            # Tell connector to trust this rank, not re-hash it.
+            # Without this the connector runs blake2s(transfer_id) % dp_size and
+            # may target a different prefill DP rank than we pinned, causing the
+            # notify to land on the wrong port and prefill to hang with
+            # "remote blocks never arrived".
+            req_data["kv_transfer_params"]["remote_dp_rank_override"] = True
         # Mark this decode request as the leader so only the DP rank that
         # actually received it sends the blocks-ready notify to prefill.
         # Without this flag all 8 decode DP ranks (is_kv_master=True) would
