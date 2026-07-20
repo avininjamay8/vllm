@@ -937,9 +937,13 @@ class MoRIIOConnectorScheduler:
         # cover all prompt blocks. When prefill finishes with max_tokens=1
         # the request is never re-scheduled, so the promotion loop in
         # build_connector_meta never runs and the RDMA write never happens.
-        if self.mode == MoRIIOMode.WRITE and request.request_id in self._reqs_need_pending_save:
-            _req, _blocks = self._reqs_need_pending_save.pop(request.request_id)
-            self._reqs_need_save[request.request_id] = (_req, _blocks)
+        # After flushing, return False so we don't fall through to the READ
+        # mode path that returns remote_block_ids to the router (wrong in WRITE).
+        if self.mode == MoRIIOMode.WRITE:
+            if request.request_id in self._reqs_need_pending_save:
+                _req, _blocks = self._reqs_need_pending_save.pop(request.request_id)
+                self._reqs_need_save[request.request_id] = (_req, _blocks)
+            return False, None
 
         # computed_block_ids = block_ids if all_full else block_ids[:-1]
         computed_block_ids = block_ids
