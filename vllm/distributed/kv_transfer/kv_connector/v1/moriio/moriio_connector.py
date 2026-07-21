@@ -934,8 +934,10 @@ class MoRIIOConnectorScheduler:
         # mode path that returns remote_block_ids to the router (wrong in WRITE).
         if self.mode == MoRIIOMode.WRITE:
             if request.request_id in self._reqs_need_pending_save:
-                _req, _blocks = self._reqs_need_pending_save.pop(request.request_id)
-                self._reqs_need_save[request.request_id] = (_req, _blocks)
+                _req, _ = self._reqs_need_pending_save.pop(request.request_id)
+                # Use block_ids (complete final set from scheduler), not the
+                # partial accumulated blocks from pending_save (first chunk only).
+                self._reqs_need_save[request.request_id] = (_req, block_ids)
             return False, None
 
         # computed_block_ids = block_ids if all_full else block_ids[:-1]
