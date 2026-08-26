@@ -247,6 +247,22 @@ class DPCoordinatorProc:
             # Send ready message to engines.
             publish_back.send(b"READY")
 
+            # Wave-0 bootstrap for MoE DP: wake all engines (including headless
+            # child ranks) before the first request. Replaces PR #51983 without
+            # touching engine core.py.
+            if (
+                self.enable_wave_coordination
+                and not engines_running
+                and current_wave == 0
+            ):
+                logger.info(
+                    "DP Coordinator bootstrapping wave %d for all engines",
+                    current_wave,
+                )
+                self._send_start_wave(
+                    publish_back, current_wave, exclude_engine_index=None
+                )
+
             logger.info("All engine subscriptions received by DP coordinator")
 
             poller = zmq.Poller()
